@@ -673,7 +673,16 @@ class DlmsBrowserService:
             raise RuntimeError("Not connected.")
         obj = self.client.objects.findByLN(ObjectType.NONE, logical_name)
         if not obj:
-            raise ValueError(f"Object {logical_name} not found.")
+            self._log(
+                "event",
+                f"Object {logical_name} not found in current session cache. Reloading association view and retrying.",
+            )
+            self.reader.get_association_view()
+            obj = self.client.objects.findByLN(ObjectType.NONE, logical_name)
+        if not obj:
+            raise ValueError(
+                f"Object {logical_name} not found. Read object tree first or ensure the object exists on the meter."
+            )
         values: list[tuple[int, Any]] = []
         for index in obj.getAttributeIndexToRead(True):
             try:
