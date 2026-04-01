@@ -56,6 +56,7 @@ class DlmsBrowserApp(tk.Tk):
         self.serial_ports: list[str] = []
 
         self._build_ui()
+        self._restore_cached_tree()
         self._refresh_ports()
         self.after(100, self._poll_events)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -276,6 +277,7 @@ class DlmsBrowserApp(tk.Tk):
 
     def _disconnect(self) -> None:
         def work():
+            self._collect_config().save(self.config_path)
             self.service.disconnect()
             return "Disconnected"
 
@@ -342,7 +344,41 @@ class DlmsBrowserApp(tk.Tk):
             label = f"v{obj.version} / SN {obj.short_name}" if obj.short_name else f"v{obj.version}"
             node = self.tree.insert(parent, "end", text=label, values=(obj.logical_name, obj.description))
             self.node_to_ln[node] = obj.logical_name
+        self.app_config.object_tree = [
+            {
+                "object_type": obj.object_type,
+                "object_type_id": obj.object_type_id,
+                "short_name": obj.short_name,
+                "logical_name": obj.logical_name,
+                "version": obj.version,
+                "description": obj.description,
+            }
+            for obj in objects
+        ]
+        self.app_config.save(self.config_path)
         self.status_var.set(f"Loaded {len(objects)} objects")
+
+    def _restore_cached_tree(self) -> None:
+        cached = self.app_config.object_tree or []
+        if not cached:
+            return
+        self.tree.delete(*self.tree.get_children())
+        self.type_nodes.clear()
+        self.node_to_ln.clear()
+        for item in sorted(cached, key=lambda x: (int(x.get("object_type_id", 0)), str(x.get("logical_name", "")))):
+            object_type = str(item.get("object_type", "Unknown"))
+            parent = self.type_nodes.get(object_type)
+            if not parent:
+                parent = self.tree.insert("", "end", text=object_type, values=("", ""), open=False)
+                self.type_nodes[object_type] = parent
+            short_name = int(item.get("short_name", 0))
+            version = int(item.get("version", 0))
+            label = f"v{version} / SN {short_name}" if short_name else f"v{version}"
+            logical_name = str(item.get("logical_name", ""))
+            node = self.tree.insert(parent, "end", text=label, values=(logical_name, str(item.get("description", ""))))
+            if logical_name:
+                self.node_to_ln[node] = logical_name
+        self.status_var.set(f"Loaded cached tree ({len(cached)} objects)")
 
     def _show_attributes(self, logical_name: str, attrs) -> None:
         self.details.delete("1.0", tk.END)
@@ -368,8 +404,6 @@ class DlmsBrowserApp(tk.Tk):
                 elif kind == "log":
                     self._append_log(payload[0], payload[1])
                 elif isinstance(payload, str):
-                    if payload in {"Connected", "Disconnected", "Port closed"}:
-                        self._clear_tree_and_details()
                     self.status_var.set(payload)
                 elif isinstance(payload, list):
                     self._populate_tree(payload)
