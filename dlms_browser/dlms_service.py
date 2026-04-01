@@ -621,6 +621,8 @@ class DlmsBrowserService:
                 logger=self._log,
             )
             self.reader.initialize_connection()
+            self._log("event", "Priming object cache from association view after connect.")
+            self.reader.get_association_view()
             self._log("event", "Keep-alive mode: reading association object attribute 1.")
             self._start_keepalive()
             self._log("event", "Connection established successfully.")
