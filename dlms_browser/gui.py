@@ -243,17 +243,16 @@ class DlmsBrowserApp(tk.Tk):
         return self.app_config
 
     def _connection_cache_key(self) -> str:
-        self._collect_config()
         return "|".join(
             [
-                self.app_config.serial.port.strip().upper(),
-                str(self.app_config.serial.baud_rate),
-                str(self.app_config.dlms.client_address),
-                str(self.app_config.dlms.logical_server),
-                str(self.app_config.dlms.physical_server),
-                self.app_config.dlms.authentication.strip().upper(),
-                self.app_config.dlms.interface_type.strip().upper(),
-                "LN" if self.app_config.dlms.use_logical_name_referencing else "SN",
+                self.port_var.get().strip().upper(),
+                self.baud_var.get().strip(),
+                self.client_addr_var.get().strip(),
+                self.logical_server_var.get().strip(),
+                self.physical_server_var.get().strip(),
+                self.auth_var.get().strip().upper(),
+                self.interface_var.get().strip().upper(),
+                "LN" if self.ln_ref_var.get() else "SN",
             ]
         )
 
@@ -403,12 +402,6 @@ class DlmsBrowserApp(tk.Tk):
         for index, value in attrs:
             self.details.insert(tk.END, f"Attribute {index}:\n{value}\n\n")
         self.status_var.set(f"Attributes loaded for {logical_name}")
-
-    def _clear_tree_and_details(self) -> None:
-        self.tree.delete(*self.tree.get_children())
-        self.type_nodes.clear()
-        self.node_to_ln.clear()
-        self.details.delete("1.0", tk.END)
 
     def _poll_events(self) -> None:
         try:
