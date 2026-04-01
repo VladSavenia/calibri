@@ -8,7 +8,7 @@ from tkinter import messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from .config import AppConfig
-from .dlms_service import DlmsBrowserService
+from .dlms_service import DlmsBrowserService, DlmsObjectInfo
 
 
 class DlmsBrowserApp(tk.Tk):
@@ -49,87 +49,32 @@ class DlmsBrowserApp(tk.Tk):
         self.manufacturer_var = tk.StringVar(value=self.app_config.dlms.manufacturer_id)
 
         self.status_var = tk.StringVar(value="Ready")
+        self.settings_summary_var = tk.StringVar(value="")
 
         self.type_nodes: dict[str, str] = {}
         self.node_to_ln: dict[str, str] = {}
+        self.serial_ports: list[str] = []
 
         self._build_ui()
         self._refresh_ports()
+        self._load_cached_tree_for_current_config()
         self.after(100, self._poll_events)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_ui(self) -> None:
         top = ttk.Frame(self, padding=10)
         top.pack(fill=tk.X)
-
-        serial_group = ttk.LabelFrame(top, text="Serial / COM", padding=8)
-        serial_group.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        settings_group = ttk.LabelFrame(top, text="Connection settings", padding=8)
+        settings_group.pack(fill=tk.X, expand=True)
         for col in range(4):
-            serial_group.columnconfigure(col, weight=1)
+            settings_group.columnconfigure(col, weight=1)
 
-        ttk.Label(serial_group, text="Port").grid(row=0, column=0, sticky="w")
-        self.port_combo = ttk.Combobox(serial_group, textvariable=self.port_var, width=16)
-        self.port_combo.grid(row=0, column=1, sticky="ew", padx=4)
-        ttk.Button(serial_group, text="Refresh", command=self._refresh_ports).grid(row=0, column=2, padx=4)
-
-        ttk.Label(serial_group, text="Baud").grid(row=1, column=0, sticky="w")
-        ttk.Entry(serial_group, textvariable=self.baud_var, width=10).grid(row=1, column=1, sticky="w", padx=4)
-        ttk.Label(serial_group, text="Data bits").grid(row=1, column=2, sticky="w")
-        ttk.Entry(serial_group, textvariable=self.data_bits_var, width=8).grid(row=1, column=3, sticky="w", padx=4)
-
-        ttk.Label(serial_group, text="Parity").grid(row=2, column=0, sticky="w")
-        ttk.Combobox(serial_group, textvariable=self.parity_var, values=["NONE", "EVEN", "ODD"], width=10).grid(row=2, column=1, sticky="w", padx=4)
-        ttk.Label(serial_group, text="Stop bits").grid(row=2, column=2, sticky="w")
-        ttk.Combobox(serial_group, textvariable=self.stop_bits_var, values=["1", "2"], width=8).grid(row=2, column=3, sticky="w", padx=4)
-
-        dlms_group = ttk.LabelFrame(top, text="DLMS / HDLC", padding=8)
-        dlms_group.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        for col in range(6):
-            dlms_group.columnconfigure(col, weight=1)
-
-        ttk.Label(dlms_group, text="Client").grid(row=0, column=0, sticky="w")
-        ttk.Entry(dlms_group, textvariable=self.client_addr_var, width=10).grid(row=0, column=1, sticky="w", padx=4)
-        ttk.Label(dlms_group, text="Wait Time").grid(row=0, column=2, sticky="w")
-        ttk.Entry(dlms_group, textvariable=self.wait_time_var, width=12).grid(row=0, column=3, sticky="w", padx=4)
-        ttk.Label(dlms_group, text="Resend count").grid(row=0, column=4, sticky="w")
-        ttk.Spinbox(dlms_group, from_=0, to=10, textvariable=self.resend_count_var, width=6).grid(row=0, column=5, sticky="w", padx=4)
-
-        ttk.Label(dlms_group, text="Address Type").grid(row=1, column=0, sticky="w")
-        ttk.Combobox(dlms_group, textvariable=self.address_type_var, values=["DEFAULT", "1_BYTE", "2_BYTE", "4_BYTE"], width=12).grid(row=1, column=1, sticky="w", padx=4)
-        ttk.Checkbutton(dlms_group, text="Broadcast", variable=self.broadcast_var).grid(row=1, column=2, sticky="w")
-        ttk.Label(dlms_group, text="Logical Server").grid(row=1, column=3, sticky="w")
-        ttk.Entry(dlms_group, textvariable=self.logical_server_var, width=8).grid(row=1, column=4, sticky="w", padx=4)
-        ttk.Label(dlms_group, text="Physical Server").grid(row=2, column=0, sticky="w")
-        ttk.Entry(dlms_group, textvariable=self.physical_server_var, width=8).grid(row=2, column=1, sticky="w", padx=4)
-
-        ttk.Label(dlms_group, text="Server raw").grid(row=2, column=2, sticky="w")
-        ttk.Entry(dlms_group, textvariable=self.server_addr_var, width=10).grid(row=2, column=3, sticky="w", padx=4)
-        ttk.Label(dlms_group, text="Auth").grid(row=2, column=4, sticky="w")
-        ttk.Combobox(
-            dlms_group,
-            textvariable=self.auth_var,
-            values=["NONE", "LOW", "HIGH", "HIGH_MD5", "HIGH_SHA1", "HIGH_GMAC", "HIGH_SHA256"],
-            width=16,
-        ).grid(row=2, column=5, sticky="w", padx=4)
-
-        ttk.Label(dlms_group, text="Password / secret").grid(row=3, column=0, sticky="w")
-        ttk.Entry(dlms_group, textvariable=self.password_var, width=16, show="*").grid(row=3, column=1, sticky="w", padx=4)
-        ttk.Label(dlms_group, text="Inactivity Timeout").grid(row=3, column=2, sticky="w")
-        ttk.Entry(dlms_group, textvariable=self.inactivity_timeout_var, width=12).grid(row=3, column=3, sticky="w", padx=4)
-
-        ttk.Label(dlms_group, text="Interface").grid(row=3, column=4, sticky="w")
-        ttk.Combobox(dlms_group, textvariable=self.interface_var, values=["HDLC", "HDLC_WITH_MODE_E"], width=16).grid(row=3, column=5, sticky="w", padx=4)
-        ttk.Label(dlms_group, text="Standard").grid(row=4, column=0, sticky="w")
-        ttk.Combobox(dlms_group, textvariable=self.standard_var, values=["DLMS", "IDIS", "INDIA", "ITALY", "SAUDI_ARABIA"], width=16).grid(row=4, column=1, sticky="w", padx=4)
-
-        ttk.Checkbutton(dlms_group, text="Use LN referencing", variable=self.ln_ref_var).grid(row=4, column=2, columnspan=2, sticky="w")
-        ttk.Label(dlms_group, text="HDLC window").grid(row=4, column=4, sticky="w")
-        ttk.Entry(dlms_group, textvariable=self.window_var, width=10).grid(row=4, column=5, sticky="w", padx=4)
-        ttk.Label(dlms_group, text="HDLC frame").grid(row=5, column=0, sticky="w")
-        ttk.Entry(dlms_group, textvariable=self.frame_var, width=10).grid(row=5, column=1, sticky="w", padx=4)
-
-        ttk.Label(dlms_group, text="Manufacturer").grid(row=5, column=2, sticky="w")
-        ttk.Entry(dlms_group, textvariable=self.manufacturer_var, width=16).grid(row=5, column=3, sticky="w", padx=4)
+        ttk.Button(settings_group, text="Serial / COM...", command=self._open_serial_settings).grid(row=0, column=0, sticky="ew", padx=3, pady=2)
+        ttk.Button(settings_group, text="Addressing...", command=self._open_address_settings).grid(row=0, column=1, sticky="ew", padx=3, pady=2)
+        ttk.Button(settings_group, text="Security & Session...", command=self._open_security_settings).grid(row=0, column=2, sticky="ew", padx=3, pady=2)
+        ttk.Button(settings_group, text="HDLC & Profile...", command=self._open_link_settings).grid(row=0, column=3, sticky="ew", padx=3, pady=2)
+        ttk.Label(settings_group, textvariable=self.settings_summary_var).grid(row=1, column=0, columnspan=4, sticky="w", padx=4, pady=(6, 0))
+        self._update_settings_summary()
 
         toolbar = ttk.Frame(self, padding=(10, 0, 10, 8))
         toolbar.pack(fill=tk.X)
@@ -169,9 +114,104 @@ class DlmsBrowserApp(tk.Tk):
         self.log_text = ScrolledText(log_group, wrap="word", height=14, state="disabled")
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
+    def _update_settings_summary(self) -> None:
+        self.settings_summary_var.set(
+            f"COM={self.port_var.get().strip() or '<none>'}, baud={self.baud_var.get().strip() or '?'} | "
+            f"client={self.client_addr_var.get().strip() or '?'}, logical={self.logical_server_var.get().strip() or '?'}, physical={self.physical_server_var.get().strip() or '?'} | "
+            f"auth={self.auth_var.get().strip() or 'NONE'}, interface={self.interface_var.get().strip() or 'HDLC'}"
+        )
+
+    def _open_settings_window(self, title: str, rows: list[dict[str, object]]) -> None:
+        window = tk.Toplevel(self)
+        window.title(title)
+        window.transient(self)
+        window.grab_set()
+        frame = ttk.Frame(window, padding=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+        for col in range(2):
+            frame.columnconfigure(col, weight=1 if col == 1 else 0)
+
+        for idx, row in enumerate(rows):
+            ttk.Label(frame, text=row["label"]).grid(row=idx, column=0, sticky="w", padx=(0, 8), pady=3)
+            kind = row["kind"]
+            var = row["var"]
+            if kind == "combo":
+                widget = ttk.Combobox(frame, textvariable=var, values=row["values"], state="readonly")
+                widget.grid(row=idx, column=1, sticky="ew", pady=3)
+            elif kind == "check":
+                widget = ttk.Checkbutton(frame, variable=var)
+                widget.grid(row=idx, column=1, sticky="w", pady=3)
+            else:
+                options = {"textvariable": var}
+                if row.get("show"):
+                    options["show"] = row["show"]
+                widget = ttk.Entry(frame, **options)
+                widget.grid(row=idx, column=1, sticky="ew", pady=3)
+
+        footer = ttk.Frame(frame)
+        footer.grid(row=len(rows), column=0, columnspan=2, sticky="e", pady=(8, 0))
+
+        def save_and_close() -> None:
+            self._update_settings_summary()
+            window.destroy()
+
+        ttk.Button(footer, text="Close", command=save_and_close).pack(side=tk.RIGHT)
+
+    def _open_serial_settings(self) -> None:
+        self._refresh_ports()
+        self._open_settings_window(
+            "Serial / COM settings",
+            [
+                {"label": "Port", "var": self.port_var, "kind": "combo", "values": self.serial_ports},
+                {"label": "Baud rate", "var": self.baud_var, "kind": "entry"},
+                {"label": "Data bits", "var": self.data_bits_var, "kind": "entry"},
+                {"label": "Parity", "var": self.parity_var, "kind": "combo", "values": ["NONE", "EVEN", "ODD", "MARK", "SPACE"]},
+                {"label": "Stop bits", "var": self.stop_bits_var, "kind": "combo", "values": ["1", "2"]},
+            ],
+        )
+
+    def _open_address_settings(self) -> None:
+        self._open_settings_window(
+            "DLMS addressing settings",
+            [
+                {"label": "Client address", "var": self.client_addr_var, "kind": "entry"},
+                {"label": "Server raw address", "var": self.server_addr_var, "kind": "entry"},
+                {"label": "Logical server", "var": self.logical_server_var, "kind": "entry"},
+                {"label": "Physical server", "var": self.physical_server_var, "kind": "entry"},
+                {"label": "Address type", "var": self.address_type_var, "kind": "combo", "values": ["DEFAULT", "1_BYTE", "2_BYTE", "4_BYTE"]},
+                {"label": "Broadcast", "var": self.broadcast_var, "kind": "check"},
+                {"label": "Use LN referencing", "var": self.ln_ref_var, "kind": "check"},
+            ],
+        )
+
+    def _open_security_settings(self) -> None:
+        self._open_settings_window(
+            "Security and session settings",
+            [
+                {"label": "Authentication", "var": self.auth_var, "kind": "combo", "values": ["NONE", "LOW", "HIGH", "HIGH_MD5", "HIGH_SHA1", "HIGH_GMAC", "HIGH_SHA256"]},
+                {"label": "Password / secret", "var": self.password_var, "kind": "entry", "show": "*"},
+                {"label": "Wait time (HH:MM:SS)", "var": self.wait_time_var, "kind": "entry"},
+                {"label": "Resend count", "var": self.resend_count_var, "kind": "entry"},
+                {"label": "Inactivity timeout", "var": self.inactivity_timeout_var, "kind": "entry"},
+                {"label": "Trace level", "var": self.trace_var, "kind": "combo", "values": ["INFO", "WARNING", "ERROR", "DEBUG"]},
+            ],
+        )
+
+    def _open_link_settings(self) -> None:
+        self._open_settings_window(
+            "HDLC and profile settings",
+            [
+                {"label": "Interface", "var": self.interface_var, "kind": "combo", "values": ["HDLC", "HDLC_WITH_MODE_E", "WRAPPER", "PLC", "PLC_HDLC"]},
+                {"label": "Standard", "var": self.standard_var, "kind": "combo", "values": ["DLMS", "IDIS", "INDIA", "ITALY", "SAUDI_ARABIA"]},
+                {"label": "HDLC window size", "var": self.window_var, "kind": "entry"},
+                {"label": "HDLC frame size", "var": self.frame_var, "kind": "entry"},
+                {"label": "Manufacturer ID", "var": self.manufacturer_var, "kind": "entry"},
+            ],
+        )
+
     def _refresh_ports(self) -> None:
         ports = self.service.list_serial_ports()
-        self.port_combo["values"] = ports
+        self.serial_ports = ports
         if ports and self.port_var.get() not in ports:
             self.port_var.set(ports[0])
 
@@ -202,9 +242,48 @@ class DlmsBrowserApp(tk.Tk):
         self.app_config.dlms.manufacturer_id = self.manufacturer_var.get().strip().upper()
         return self.app_config
 
+    def _connection_cache_key(self) -> str:
+        self._collect_config()
+        return "|".join(
+            [
+                self.app_config.serial.port.strip().upper(),
+                str(self.app_config.serial.baud_rate),
+                str(self.app_config.dlms.client_address),
+                str(self.app_config.dlms.logical_server),
+                str(self.app_config.dlms.physical_server),
+                self.app_config.dlms.authentication.strip().upper(),
+                self.app_config.dlms.interface_type.strip().upper(),
+                "LN" if self.app_config.dlms.use_logical_name_referencing else "SN",
+            ]
+        )
+
+    def _load_cached_tree_for_current_config(self) -> None:
+        try:
+            cache_key = self._connection_cache_key()
+            cached = self.app_config.object_cache.get(cache_key, [])
+            if not cached:
+                return
+            objects = [
+                DlmsObjectInfo(
+                    object_type=str(item.get("object_type", "")),
+                    object_type_id=int(item.get("object_type_id", 0)),
+                    short_name=int(item.get("short_name", 0)),
+                    logical_name=str(item.get("logical_name", "")),
+                    version=int(item.get("version", 0)),
+                    description=str(item.get("description", "")),
+                )
+                for item in cached
+            ]
+            self._populate_tree(objects)
+            self.status_var.set(f"Loaded cached tree: {len(objects)} objects")
+        except Exception as exc:
+            self._append_log("event", f"Failed to load cached tree: {exc}")
+
     def _save_config(self) -> None:
         try:
             self._collect_config().save(self.config_path)
+            self._update_settings_summary()
+            self._load_cached_tree_for_current_config()
             self.status_var.set(f"Config saved: {self.config_path}")
         except Exception as exc:
             messagebox.showerror("Save config", str(exc))
@@ -232,6 +311,8 @@ class DlmsBrowserApp(tk.Tk):
             return "Connected"
 
         self._run_worker("Connecting...", work)
+        self._update_settings_summary()
+        self._load_cached_tree_for_current_config()
 
     def _disconnect(self) -> None:
         def work():
@@ -301,6 +382,19 @@ class DlmsBrowserApp(tk.Tk):
             label = f"v{obj.version} / SN {obj.short_name}" if obj.short_name else f"v{obj.version}"
             node = self.tree.insert(parent, "end", text=label, values=(obj.logical_name, obj.description))
             self.node_to_ln[node] = obj.logical_name
+        cache_key = self._connection_cache_key()
+        self.app_config.object_cache[cache_key] = [
+            {
+                "object_type": obj.object_type,
+                "object_type_id": obj.object_type_id,
+                "short_name": obj.short_name,
+                "logical_name": obj.logical_name,
+                "version": obj.version,
+                "description": obj.description,
+            }
+            for obj in objects
+        ]
+        self.app_config.save(self.config_path)
         self.status_var.set(f"Loaded {len(objects)} objects")
 
     def _show_attributes(self, logical_name: str, attrs) -> None:
@@ -309,6 +403,12 @@ class DlmsBrowserApp(tk.Tk):
         for index, value in attrs:
             self.details.insert(tk.END, f"Attribute {index}:\n{value}\n\n")
         self.status_var.set(f"Attributes loaded for {logical_name}")
+
+    def _clear_tree_and_details(self) -> None:
+        self.tree.delete(*self.tree.get_children())
+        self.type_nodes.clear()
+        self.node_to_ln.clear()
+        self.details.delete("1.0", tk.END)
 
     def _poll_events(self) -> None:
         try:

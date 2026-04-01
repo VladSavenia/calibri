@@ -41,6 +41,7 @@ class DlmsConfig:
 class AppConfig:
     serial: SerialConfig = field(default_factory=SerialConfig)
     dlms: DlmsConfig = field(default_factory=DlmsConfig)
+    object_cache: dict[str, list[dict[str, object]]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: str | Path) -> "AppConfig":
@@ -53,6 +54,7 @@ class AppConfig:
         return cls(
             serial=SerialConfig(**data.get("serial", {})),
             dlms=DlmsConfig(**data.get("dlms", {})),
+            object_cache=data.get("object_cache", {}),
         )
 
     def save(self, path: str | Path) -> None:
