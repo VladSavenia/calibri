@@ -404,8 +404,6 @@ class DlmsBrowserApp(tk.Tk):
                 elif kind == "log":
                     self._append_log(payload[0], payload[1])
                 elif isinstance(payload, str):
-                    if payload == "Connected":
-                        self._clear_tree_and_details()
                     self.status_var.set(payload)
                 elif isinstance(payload, list):
                     self._populate_tree(payload)
