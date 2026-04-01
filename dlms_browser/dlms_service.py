@@ -22,6 +22,7 @@ from gurux_dlms.objects import (
     GXDLMSAssociationLogicalName,
     GXDLMSAssociationShortName,
     GXDLMSDemandRegister,
+    GXDLMSObject,
     GXDLMSExtendedRegister,
     GXDLMSProfileGeneric,
     GXDLMSRegister,
@@ -621,8 +622,7 @@ class DlmsBrowserService:
                 logger=self._log,
             )
             self.reader.initialize_connection()
-            self._log("event", "Priming object cache from association view after connect.")
-            self.reader.get_association_view()
+            self._hydrate_objects_from_config_cache()
             self._log("event", "Keep-alive mode: reading association object attribute 1.")
             self._start_keepalive()
             self._log("event", "Connection established successfully.")
@@ -630,6 +630,36 @@ class DlmsBrowserService:
             self._log("event", "Connection failed. Releasing resources.")
             self.disconnect()
             raise
+
+    def _hydrate_objects_from_config_cache(self) -> None:
+        if not self.client:
+            return
+        cached = getattr(self.config, "object_tree", None) or []
+        if not cached:
+            return
+        self.client.objects.clear()
+        hydrated = 0
+        for item in cached:
+            try:
+                object_type_id = int(item.get("object_type_id", 0))
+                logical_name = str(item.get("logical_name", ""))
+                short_name = int(item.get("short_name", 0))
+                version = int(item.get("version", 0))
+                if not logical_name:
+                    continue
+                object_type = ObjectType(object_type_id)
+                obj = self.client.createObject(object_type)
+                if obj is None:
+                    obj = GXDLMSObject(object_type, logical_name, short_name)
+                obj.logicalName = logical_name
+                obj.shortName = short_name
+                obj.version = version
+                self.client.objects.append(obj)
+                hydrated += 1
+            except Exception as exc:
+                self._log("event", f"Skipping cached object entry due to parse error: {exc}")
+        if hydrated:
+            self._log("event", f"Loaded {hydrated} object(s) from cached tree without association read.")
 
     def disconnect(self) -> None:
         self._stop_keepalive()
