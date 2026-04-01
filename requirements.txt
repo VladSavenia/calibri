@@ -1,0 +1,4 @@
+gurux-common
+gurux-dlms
+gurux-serial
+pyserial
