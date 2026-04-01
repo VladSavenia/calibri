@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import ast
 from dataclasses import dataclass
 from datetime import datetime
 from enum import IntEnum
@@ -181,6 +182,16 @@ def _parse_secret(value: str) -> str | bytes | None:
     if text.lower().startswith("0x"):
         return bytes.fromhex(text[2:])
     return text
+
+
+def _parse_attribute_input(value: str) -> Any:
+    text = value.strip()
+    if not text:
+        return ""
+    try:
+        return ast.literal_eval(text)
+    except Exception:
+        return value
 
 
 def _enum_to_int(value: Any) -> int:
@@ -725,3 +736,24 @@ class DlmsBrowserService:
                 self._log("event", f"Attribute read failed for {logical_name}:{index}: {exc}")
                 values.append((index, f"<read error: {exc}>"))
         return values
+
+    def write_object_attributes(self, logical_name: str, values: dict[int, str]) -> None:
+        if not self.reader or not self.client:
+            raise RuntimeError("Not connected.")
+        obj = self.client.objects.findByLN(ObjectType.NONE, logical_name)
+        if not obj:
+            raise ValueError(f"Object {logical_name} not found. Read object tree first.")
+
+        for index, raw_value in values.items():
+            try:
+                parsed_value = _parse_attribute_input(raw_value)
+                self._log("event", f"Writing attribute {index} for {logical_name}.")
+                request = self.client.write(obj, int(index), parsed_value)
+                reply = GXReplyData()
+                self.reader.read_data_block(request, reply)
+                try:
+                    self.client.updateValue(obj, int(index), parsed_value)
+                except Exception:
+                    pass
+            except Exception as exc:
+                raise RuntimeError(f"Failed to write {logical_name}:{index}: {exc}") from exc

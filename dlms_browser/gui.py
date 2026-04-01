@@ -6,6 +6,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
+from typing import Any
 
 from .config import AppConfig
 from .dlms_service import DlmsBrowserService
@@ -50,6 +51,8 @@ class DlmsBrowserApp(tk.Tk):
 
         self.status_var = tk.StringVar(value="Ready")
         self.settings_summary_var = tk.StringVar(value="")
+        self.current_logical_name: str | None = None
+        self.attribute_vars: dict[int, tk.StringVar] = {}
 
         self.type_nodes: dict[str, str] = {}
         self.node_to_ln: dict[str, str] = {}
@@ -106,8 +109,35 @@ class DlmsBrowserApp(tk.Tk):
 
         details_group = ttk.LabelFrame(right, text="Object details", padding=6)
         details_group.pack(fill=tk.BOTH, expand=True)
-        self.details = tk.Text(details_group, wrap="word", height=16)
-        self.details.pack(fill=tk.BOTH, expand=True)
+        details_toolbar = ttk.Frame(details_group)
+        details_toolbar.pack(fill=tk.X, pady=(0, 6))
+        self.details_title_var = tk.StringVar(value="Select object to load attributes")
+        ttk.Label(details_toolbar, textvariable=self.details_title_var).pack(side=tk.LEFT)
+        self.write_button = tk.Button(
+            details_toolbar,
+            text="WRITE",
+            bg="#0b6b3a",
+            fg="white",
+            activebackground="#0f8f4e",
+            activeforeground="white",
+            font=("TkDefaultFont", 9, "bold"),
+            relief=tk.RAISED,
+            padx=12,
+            pady=3,
+            command=self._write_attributes,
+            state=tk.DISABLED,
+        )
+        self.write_button.pack(side=tk.RIGHT)
+
+        self.details_canvas = tk.Canvas(details_group, highlightthickness=0)
+        details_scroll = ttk.Scrollbar(details_group, orient=tk.VERTICAL, command=self.details_canvas.yview)
+        self.details_canvas.configure(yscrollcommand=details_scroll.set)
+        self.details_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        details_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.details_frame = ttk.Frame(self.details_canvas)
+        self.details_canvas_window = self.details_canvas.create_window((0, 0), window=self.details_frame, anchor="nw")
+        self.details_frame.bind("<Configure>", self._on_details_frame_configure)
+        self.details_canvas.bind("<Configure>", self._on_details_canvas_configure)
 
         log_group = ttk.LabelFrame(right, text="Exchange log", padding=6)
         log_group.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
@@ -381,17 +411,62 @@ class DlmsBrowserApp(tk.Tk):
         self.status_var.set(f"Loaded cached tree ({len(cached)} objects)")
 
     def _show_attributes(self, logical_name: str, attrs) -> None:
-        self.details.delete("1.0", tk.END)
-        self.details.insert(tk.END, f"Logical Name: {logical_name}\n\n")
-        for index, value in attrs:
-            self.details.insert(tk.END, f"Attribute {index}:\n{value}\n\n")
+        for child in self.details_frame.winfo_children():
+            child.destroy()
+        self.current_logical_name = logical_name
+        self.attribute_vars.clear()
+        self.details_title_var.set(f"Logical Name: {logical_name}")
+
+        ttk.Label(self.details_frame, text="Attribute", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 4))
+        ttk.Label(self.details_frame, text="Value (editable)", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=1, sticky="w", pady=(0, 4))
+        self.details_frame.columnconfigure(1, weight=1)
+
+        for row_idx, (index, value) in enumerate(attrs, start=1):
+            ttk.Label(self.details_frame, text=str(index)).grid(row=row_idx, column=0, sticky="nw", padx=(0, 8), pady=3)
+            var = tk.StringVar(value=self._format_attribute_value(value))
+            self.attribute_vars[int(index)] = var
+            entry = ttk.Entry(self.details_frame, textvariable=var)
+            entry.grid(row=row_idx, column=1, sticky="ew", pady=3)
+
+        self.write_button.configure(state=tk.NORMAL if self.attribute_vars else tk.DISABLED)
         self.status_var.set(f"Attributes loaded for {logical_name}")
 
     def _clear_tree_and_details(self) -> None:
         self.tree.delete(*self.tree.get_children())
         self.type_nodes.clear()
         self.node_to_ln.clear()
-        self.details.delete("1.0", tk.END)
+        for child in self.details_frame.winfo_children():
+            child.destroy()
+        self.attribute_vars.clear()
+        self.current_logical_name = None
+        self.details_title_var.set("Select object to load attributes")
+        self.write_button.configure(state=tk.DISABLED)
+
+    @staticmethod
+    def _format_attribute_value(value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value)
+
+    def _on_details_frame_configure(self, _event=None) -> None:
+        self.details_canvas.configure(scrollregion=self.details_canvas.bbox("all"))
+
+    def _on_details_canvas_configure(self, event=None) -> None:
+        if event is not None:
+            self.details_canvas.itemconfigure(self.details_canvas_window, width=event.width)
+
+    def _write_attributes(self) -> None:
+        logical_name = self.current_logical_name
+        if not logical_name:
+            messagebox.showwarning("Write attributes", "Select an object first.")
+            return
+        values = {index: var.get() for index, var in self.attribute_vars.items()}
+
+        def work():
+            self.service.write_object_attributes(logical_name, values)
+            return logical_name, self.service.read_object_attributes(logical_name), "write_ok"
+
+        self._run_worker(f"Writing attributes for {logical_name}...", work)
 
     def _poll_events(self) -> None:
         try:
@@ -407,6 +482,9 @@ class DlmsBrowserApp(tk.Tk):
                     self.status_var.set(payload)
                 elif isinstance(payload, list):
                     self._populate_tree(payload)
+                elif isinstance(payload, tuple) and len(payload) == 3 and payload[2] == "write_ok":
+                    self._show_attributes(payload[0], payload[1])
+                    self.status_var.set(f"Attributes written for {payload[0]}")
                 elif isinstance(payload, tuple) and len(payload) == 2:
                     self._show_attributes(payload[0], payload[1])
         except queue.Empty:
