@@ -432,13 +432,21 @@ class DlmsBrowserApp(tk.Tk):
             ttk.Label(self.details_frame, text=str(index)).grid(row=row_idx, column=0, sticky="nw", padx=(0, 8), pady=3)
             ttk.Label(self.details_frame, text=access_text).grid(row=row_idx, column=1, sticky="nw", padx=(0, 8), pady=3)
             var = tk.StringVar(value=self._format_attribute_value(value))
-            entry = ttk.Entry(self.details_frame, textvariable=var)
+            entry = tk.Entry(
+                self.details_frame,
+                textvariable=var,
+                relief=tk.SOLID,
+                borderwidth=1,
+                readonlybackground="#efefef",
+                disabledforeground="black",
+                fg="black",
+            )
             entry.grid(row=row_idx, column=2, sticky="ew", pady=3)
             if is_writable:
                 self.attribute_vars[int(index)] = var
                 writable_count += 1
             else:
-                entry.state(["readonly"])
+                entry.configure(state="readonly")
 
         self.write_button.configure(state=tk.NORMAL if self.attribute_vars else tk.DISABLED)
         readonly_count = len(attrs) - writable_count
