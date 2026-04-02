@@ -11,6 +11,8 @@ from typing import Any, Callable
 from gurux_common.io import Parity, StopBits
 from gurux_dlms import GXReplyData
 from gurux_dlms.enums import (
+    AccessMode,
+    AccessMode3,
     Authentication,
     Conformance,
     DataType,
@@ -219,6 +221,23 @@ def _object_type_display(value: Any) -> tuple[int, str]:
         return object_id, f"{object_id:>3} - {pretty}"
     text = str(value).replace('_', ' ').title()
     return object_id, f"{object_id:>3} - {text}"
+
+
+def _is_writable_access_mode(access_mode: Any) -> bool:
+    if access_mode in (AccessMode.WRITE, AccessMode.READ_WRITE, AccessMode.AUTHENTICATED_WRITE, AccessMode.AUTHENTICATED_READ_WRITE):
+        return True
+    try:
+        mode_value = int(access_mode)
+    except Exception:
+        return False
+    write_flags = (
+        int(AccessMode3.WRITE),
+        int(AccessMode3.READ_WRITE),
+        int(AccessMode3.AUTHENTICATED_REQUEST),
+        int(AccessMode3.ENCRYPTED_REQUEST),
+        int(AccessMode3.DIGITALLY_SIGNED_REQUEST),
+    )
+    return any((mode_value & flag) == flag for flag in write_flags)
 
 
 @dataclass
@@ -746,13 +765,22 @@ class DlmsBrowserService:
 
         for index, raw_value in values.items():
             try:
+                index = int(index)
+                access_mode = obj.getAccess(index)
+                access_mode_v3 = obj.getAccess3(index)
+                if not (_is_writable_access_mode(access_mode) or _is_writable_access_mode(access_mode_v3)):
+                    raise RuntimeError(
+                        f"Write access denied by meter association for {logical_name}:{index} "
+                        f"(access={access_mode}, access3={access_mode_v3})."
+                    )
                 parsed_value = _parse_attribute_input(raw_value)
                 self._log("event", f"Writing attribute {index} for {logical_name}.")
-                request = self.client.write(obj, int(index), parsed_value)
+                self.client.updateValue(obj, index, parsed_value)
+                request = self.client.write(obj, index)
                 reply = GXReplyData()
                 self.reader.read_data_block(request, reply)
                 try:
-                    self.client.updateValue(obj, int(index), parsed_value)
+                    self.client.updateValue(obj, index, parsed_value)
                 except Exception:
                     pass
             except Exception as exc:
