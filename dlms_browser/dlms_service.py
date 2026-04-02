@@ -240,6 +240,13 @@ def _is_writable_access_mode(access_mode: Any) -> bool:
     return any((mode_value & flag) == flag for flag in write_flags)
 
 
+def _access_mode_is_known(access_mode: Any) -> bool:
+    try:
+        return int(access_mode) >= 0
+    except Exception:
+        return False
+
+
 @dataclass
 class DlmsObjectInfo:
     object_type: str
@@ -768,10 +775,14 @@ class DlmsBrowserService:
                 index = int(index)
                 access_mode = obj.getAccess(index)
                 access_mode_v3 = obj.getAccess3(index)
-                if not (_is_writable_access_mode(access_mode) or _is_writable_access_mode(access_mode_v3)):
-                    raise RuntimeError(
-                        f"Write access denied by meter association for {logical_name}:{index} "
-                        f"(access={access_mode}, access3={access_mode_v3})."
+                access_known = _access_mode_is_known(access_mode) or _access_mode_is_known(access_mode_v3)
+                if access_known and not (
+                    _is_writable_access_mode(access_mode) or _is_writable_access_mode(access_mode_v3)
+                ):
+                    self._log(
+                        "event",
+                        f"Association reports read-only for {logical_name}:{index} "
+                        f"(access={access_mode}, access3={access_mode_v3}). Trying write anyway.",
                     )
                 parsed_value = _parse_attribute_input(raw_value)
                 self._log("event", f"Writing attribute {index} for {logical_name}.")
@@ -784,4 +795,10 @@ class DlmsBrowserService:
                 except Exception:
                     pass
             except Exception as exc:
-                raise RuntimeError(f"Failed to write {logical_name}:{index}: {exc}") from exc
+                details = str(exc)
+                if "read-write denied" in details.lower() or "readwritedenied" in details.lower():
+                    details = (
+                        f"{details}. Meter denied write for this attribute. "
+                        "Check authorization/security level and object access rights."
+                    )
+                raise RuntimeError(f"Failed to write {logical_name}:{index}: {details}") from exc
