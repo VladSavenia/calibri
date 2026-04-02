@@ -12,7 +12,6 @@ from gurux_common.io import Parity, StopBits
 from gurux_dlms import GXReplyData
 from gurux_dlms.enums import (
     AccessMode,
-    AccessMode3,
     Authentication,
     Conformance,
     DataType,
@@ -234,13 +233,12 @@ def _is_writable_access_mode(access_mode: Any) -> bool:
         mode_value = int(raw_value)
     except Exception:
         return False
-    write_bit = int(AccessMode3.WRITE)
-    auth_write_flags = (
-        int(AccessMode3.AUTHENTICATED_REQUEST),
-        int(AccessMode3.ENCRYPTED_REQUEST),
-        int(AccessMode3.DIGITALLY_SIGNED_REQUEST),
+    return mode_value in (
+        int(AccessMode.WRITE),
+        int(AccessMode.READ_WRITE),
+        int(AccessMode.AUTHENTICATED_WRITE),
+        int(AccessMode.AUTHENTICATED_READ_WRITE),
     )
-    return (mode_value & write_bit) == write_bit or any((mode_value & flag) == flag for flag in auth_write_flags)
 
 
 def _access_mode_is_known(access_mode: Any) -> bool:
@@ -250,22 +248,22 @@ def _access_mode_is_known(access_mode: Any) -> bool:
         return False
 
 
-def _get_attribute_access(obj: GXDLMSObject, index: int) -> tuple[Any, Any, bool]:
+def _get_attribute_access(obj: GXDLMSObject, index: int) -> tuple[Any, bool]:
     if index == 1:
-        return AccessMode.READ, AccessMode3.READ, True
+        return AccessMode.READ, True
     attributes = getattr(obj, "attributes", None)
     if attributes is None or not hasattr(attributes, "find"):
-        return obj.getAccess(index), obj.getAccess3(index), False
+        return obj.getAccess(index), False
     attribute_access = attributes.find(index)
     if attribute_access is None:
-        return obj.getAccess(index), obj.getAccess3(index), False
-    return attribute_access.access, attribute_access.access3, True
+        return obj.getAccess(index), False
+    return attribute_access.access, True
 
 
-def _format_attribute_access(access_mode: Any, access_mode_v3: Any, access_known: bool) -> str:
+def _format_attribute_access(access_mode: Any, access_known: bool) -> str:
     if not access_known:
-        return f"Unknown ({access_mode} / {access_mode_v3})"
-    return f"{access_mode} / {access_mode_v3}"
+        return f"Unknown ({access_mode})"
+    return str(access_mode)
 
 
 @dataclass
@@ -775,14 +773,10 @@ class DlmsBrowserService:
             )
         values: list[tuple[int, Any, bool, str]] = []
         for index in obj.getAttributeIndexToRead(True):
-            access_mode, access_mode_v3, access_known = _get_attribute_access(obj, index)
-            access_known = access_known and (
-                _access_mode_is_known(access_mode) or _access_mode_is_known(access_mode_v3)
-            )
-            writable = access_known and (
-                _is_writable_access_mode(access_mode) or _is_writable_access_mode(access_mode_v3)
-            )
-            access_text = _format_attribute_access(access_mode, access_mode_v3, access_known)
+            access_mode, access_known = _get_attribute_access(obj, index)
+            access_known = access_known and _access_mode_is_known(access_mode)
+            writable = access_known and _is_writable_access_mode(access_mode)
+            access_text = _format_attribute_access(access_mode, access_known)
             try:
                 if obj.canRead(index):
                     value = self.reader.read(obj, index)
@@ -802,17 +796,13 @@ class DlmsBrowserService:
         for index, raw_value in values.items():
             try:
                 index = int(index)
-                access_mode, access_mode_v3, access_known = _get_attribute_access(obj, index)
-                access_known = access_known and (
-                    _access_mode_is_known(access_mode) or _access_mode_is_known(access_mode_v3)
-                )
-                if access_known and not (
-                    _is_writable_access_mode(access_mode) or _is_writable_access_mode(access_mode_v3)
-                ):
+                access_mode, access_known = _get_attribute_access(obj, index)
+                access_known = access_known and _access_mode_is_known(access_mode)
+                if access_known and not _is_writable_access_mode(access_mode):
                     self._log(
                         "event",
                         f"Association reports read-only for {logical_name}:{index} "
-                        f"(access={access_mode}, access3={access_mode_v3}). Trying write anyway.",
+                        f"(access={access_mode}). Trying write anyway.",
                     )
                 parsed_value = _parse_attribute_input(raw_value)
                 self._log("event", f"Writing attribute {index} for {logical_name}.")
