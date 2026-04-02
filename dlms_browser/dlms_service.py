@@ -226,18 +226,21 @@ def _object_type_display(value: Any) -> tuple[int, str]:
 def _is_writable_access_mode(access_mode: Any) -> bool:
     if access_mode in (AccessMode.WRITE, AccessMode.READ_WRITE, AccessMode.AUTHENTICATED_WRITE, AccessMode.AUTHENTICATED_READ_WRITE):
         return True
+    mode_name = str(getattr(access_mode, "name", access_mode)).upper().replace("-", "_")
+    if mode_name in {"WRITE", "READ_WRITE", "AUTHENTICATED_WRITE", "AUTHENTICATED_READ_WRITE"}:
+        return True
     try:
-        mode_value = int(access_mode)
+        raw_value = getattr(access_mode, "value", access_mode)
+        mode_value = int(raw_value)
     except Exception:
         return False
-    write_flags = (
-        int(AccessMode3.WRITE),
-        int(AccessMode3.READ_WRITE),
+    write_bit = int(AccessMode3.WRITE)
+    auth_write_flags = (
         int(AccessMode3.AUTHENTICATED_REQUEST),
         int(AccessMode3.ENCRYPTED_REQUEST),
         int(AccessMode3.DIGITALLY_SIGNED_REQUEST),
     )
-    return any((mode_value & flag) == flag for flag in write_flags)
+    return (mode_value & write_bit) == write_bit or any((mode_value & flag) == flag for flag in auth_write_flags)
 
 
 def _access_mode_is_known(access_mode: Any) -> bool:

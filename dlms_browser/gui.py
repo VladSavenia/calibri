@@ -435,7 +435,7 @@ class DlmsBrowserApp(tk.Tk):
                 self.attribute_vars[int(index)] = var
                 writable_count += 1
             else:
-                entry.state(["disabled"])
+                entry.state(["readonly"])
 
         self.write_button.configure(state=tk.NORMAL if self.attribute_vars else tk.DISABLED)
         readonly_count = len(attrs) - writable_count
