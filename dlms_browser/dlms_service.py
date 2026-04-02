@@ -250,6 +250,18 @@ def _access_mode_is_known(access_mode: Any) -> bool:
         return False
 
 
+def _get_attribute_access(obj: GXDLMSObject, index: int) -> tuple[Any, Any, bool]:
+    if index == 1:
+        return AccessMode.READ, AccessMode3.READ, True
+    attributes = getattr(obj, "attributes", None)
+    if attributes is None or not hasattr(attributes, "find"):
+        return obj.getAccess(index), obj.getAccess3(index), False
+    attribute_access = attributes.find(index)
+    if attribute_access is None:
+        return obj.getAccess(index), obj.getAccess3(index), False
+    return attribute_access.access, attribute_access.access3, True
+
+
 @dataclass
 class DlmsObjectInfo:
     object_type: str
@@ -757,9 +769,10 @@ class DlmsBrowserService:
             )
         values: list[tuple[int, Any, bool]] = []
         for index in obj.getAttributeIndexToRead(True):
-            access_mode = obj.getAccess(index)
-            access_mode_v3 = obj.getAccess3(index)
-            access_known = _access_mode_is_known(access_mode) or _access_mode_is_known(access_mode_v3)
+            access_mode, access_mode_v3, access_known = _get_attribute_access(obj, index)
+            access_known = access_known and (
+                _access_mode_is_known(access_mode) or _access_mode_is_known(access_mode_v3)
+            )
             writable = (
                 _is_writable_access_mode(access_mode) or _is_writable_access_mode(access_mode_v3)
                 if access_known
@@ -784,9 +797,10 @@ class DlmsBrowserService:
         for index, raw_value in values.items():
             try:
                 index = int(index)
-                access_mode = obj.getAccess(index)
-                access_mode_v3 = obj.getAccess3(index)
-                access_known = _access_mode_is_known(access_mode) or _access_mode_is_known(access_mode_v3)
+                access_mode, access_mode_v3, access_known = _get_attribute_access(obj, index)
+                access_known = access_known and (
+                    _access_mode_is_known(access_mode) or _access_mode_is_known(access_mode_v3)
+                )
                 if access_known and not (
                     _is_writable_access_mode(access_mode) or _is_writable_access_mode(access_mode_v3)
                 ):
