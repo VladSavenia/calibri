@@ -737,7 +737,7 @@ class DlmsBrowserService:
         self._log("event", f"Object list prepared: {len(result)} item(s).")
         return result
 
-    def read_object_attributes(self, logical_name: str) -> list[tuple[int, Any]]:
+    def read_object_attributes(self, logical_name: str) -> list[tuple[int, Any, bool]]:
         if not self.reader or not self.client:
             raise RuntimeError("Not connected.")
         obj = self.client.objects.findByLN(ObjectType.NONE, logical_name)
@@ -752,15 +752,23 @@ class DlmsBrowserService:
             raise ValueError(
                 f"Object {logical_name} not found. Read object tree first or ensure the object exists on the meter."
             )
-        values: list[tuple[int, Any]] = []
+        values: list[tuple[int, Any, bool]] = []
         for index in obj.getAttributeIndexToRead(True):
+            access_mode = obj.getAccess(index)
+            access_mode_v3 = obj.getAccess3(index)
+            access_known = _access_mode_is_known(access_mode) or _access_mode_is_known(access_mode_v3)
+            writable = (
+                _is_writable_access_mode(access_mode) or _is_writable_access_mode(access_mode_v3)
+                if access_known
+                else True
+            )
             try:
                 if obj.canRead(index):
                     value = self.reader.read(obj, index)
-                    values.append((index, value))
+                    values.append((index, value, writable))
             except Exception as exc:
                 self._log("event", f"Attribute read failed for {logical_name}:{index}: {exc}")
-                values.append((index, f"<read error: {exc}>"))
+                values.append((index, f"<read error: {exc}>", writable))
         return values
 
     def write_object_attributes(self, logical_name: str, values: dict[int, str]) -> None:
