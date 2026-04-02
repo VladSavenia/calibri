@@ -11,6 +11,7 @@ from typing import Any, Callable
 from gurux_common.io import Parity, StopBits
 from gurux_dlms import GXReplyData
 from gurux_dlms.enums import (
+    AccessMode,
     Authentication,
     Conformance,
     DataType,
@@ -219,6 +220,50 @@ def _object_type_display(value: Any) -> tuple[int, str]:
         return object_id, f"{object_id:>3} - {pretty}"
     text = str(value).replace('_', ' ').title()
     return object_id, f"{object_id:>3} - {text}"
+
+
+def _is_writable_access_mode(access_mode: Any) -> bool:
+    if access_mode in (AccessMode.WRITE, AccessMode.READ_WRITE, AccessMode.AUTHENTICATED_WRITE, AccessMode.AUTHENTICATED_READ_WRITE):
+        return True
+    mode_name = str(getattr(access_mode, "name", access_mode)).upper().replace("-", "_")
+    if mode_name in {"WRITE", "READ_WRITE", "AUTHENTICATED_WRITE", "AUTHENTICATED_READ_WRITE"}:
+        return True
+    try:
+        raw_value = getattr(access_mode, "value", access_mode)
+        mode_value = int(raw_value)
+    except Exception:
+        return False
+    return mode_value in (
+        int(AccessMode.WRITE),
+        int(AccessMode.READ_WRITE),
+        int(AccessMode.AUTHENTICATED_WRITE),
+        int(AccessMode.AUTHENTICATED_READ_WRITE),
+    )
+
+
+def _access_mode_is_known(access_mode: Any) -> bool:
+    try:
+        return int(access_mode) >= 0
+    except Exception:
+        return False
+
+
+def _get_attribute_access(obj: GXDLMSObject, index: int) -> tuple[Any, bool]:
+    if index == 1:
+        return AccessMode.READ, True
+    attributes = getattr(obj, "attributes", None)
+    if attributes is None or not hasattr(attributes, "find"):
+        return obj.getAccess(index), False
+    attribute_access = attributes.find(index)
+    if attribute_access is None:
+        return obj.getAccess(index), False
+    return attribute_access.access, True
+
+
+def _format_attribute_access(access_mode: Any, access_known: bool) -> str:
+    if not access_known:
+        return f"Unknown ({access_mode})"
+    return str(access_mode)
 
 
 @dataclass
@@ -711,7 +756,7 @@ class DlmsBrowserService:
         self._log("event", f"Object list prepared: {len(result)} item(s).")
         return result
 
-    def read_object_attributes(self, logical_name: str) -> list[tuple[int, Any]]:
+    def read_object_attributes(self, logical_name: str) -> list[tuple[int, Any, bool, str]]:
         if not self.reader or not self.client:
             raise RuntimeError("Not connected.")
         obj = self.client.objects.findByLN(ObjectType.NONE, logical_name)
@@ -726,15 +771,19 @@ class DlmsBrowserService:
             raise ValueError(
                 f"Object {logical_name} not found. Read object tree first or ensure the object exists on the meter."
             )
-        values: list[tuple[int, Any]] = []
+        values: list[tuple[int, Any, bool, str]] = []
         for index in obj.getAttributeIndexToRead(True):
+            access_mode, access_known = _get_attribute_access(obj, index)
+            access_known = access_known and _access_mode_is_known(access_mode)
+            writable = access_known and _is_writable_access_mode(access_mode)
+            access_text = _format_attribute_access(access_mode, access_known)
             try:
                 if obj.canRead(index):
                     value = self.reader.read(obj, index)
-                    values.append((index, value))
+                    values.append((index, value, writable, access_text))
             except Exception as exc:
                 self._log("event", f"Attribute read failed for {logical_name}:{index}: {exc}")
-                values.append((index, f"<read error: {exc}>"))
+                values.append((index, f"<read error: {exc}>", writable, access_text))
         return values
 
     def write_object_attributes(self, logical_name: str, values: dict[int, str]) -> None:
@@ -746,14 +795,30 @@ class DlmsBrowserService:
 
         for index, raw_value in values.items():
             try:
+                index = int(index)
+                access_mode, access_known = _get_attribute_access(obj, index)
+                access_known = access_known and _access_mode_is_known(access_mode)
+                if access_known and not _is_writable_access_mode(access_mode):
+                    self._log(
+                        "event",
+                        f"Association reports read-only for {logical_name}:{index} "
+                        f"(access={access_mode}). Trying write anyway.",
+                    )
                 parsed_value = _parse_attribute_input(raw_value)
                 self._log("event", f"Writing attribute {index} for {logical_name}.")
-                request = self.client.write(obj, int(index), parsed_value)
+                self.client.updateValue(obj, index, parsed_value)
+                request = self.client.write(obj, index)
                 reply = GXReplyData()
                 self.reader.read_data_block(request, reply)
                 try:
-                    self.client.updateValue(obj, int(index), parsed_value)
+                    self.client.updateValue(obj, index, parsed_value)
                 except Exception:
                     pass
             except Exception as exc:
-                raise RuntimeError(f"Failed to write {logical_name}:{index}: {exc}") from exc
+                details = str(exc)
+                if "read-write denied" in details.lower() or "readwritedenied" in details.lower():
+                    details = (
+                        f"{details}. Meter denied write for this attribute. "
+                        "Check authorization/security level and object access rights."
+                    )
+                raise RuntimeError(f"Failed to write {logical_name}:{index}: {details}") from exc
