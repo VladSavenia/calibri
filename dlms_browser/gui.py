@@ -418,8 +418,9 @@ class DlmsBrowserApp(tk.Tk):
         self.details_title_var.set(f"Logical Name: {logical_name}")
 
         ttk.Label(self.details_frame, text="Attribute", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 4))
-        ttk.Label(self.details_frame, text="Value", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=1, sticky="w", pady=(0, 4))
-        self.details_frame.columnconfigure(1, weight=1)
+        ttk.Label(self.details_frame, text="Access", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=1, sticky="w", padx=(0, 8), pady=(0, 4))
+        ttk.Label(self.details_frame, text="Value", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=2, sticky="w", pady=(0, 4))
+        self.details_frame.columnconfigure(2, weight=1)
 
         writable_count = 0
         for row_idx, item in enumerate(attrs, start=1):
@@ -427,10 +428,12 @@ class DlmsBrowserApp(tk.Tk):
                 index, value, is_writable = item[0], item[1], bool(item[2])
             else:
                 index, value, is_writable = item[0], item[1], True
+            access_text = item[3] if len(item) >= 4 else ("Read/Write" if is_writable else "Read-only")
             ttk.Label(self.details_frame, text=str(index)).grid(row=row_idx, column=0, sticky="nw", padx=(0, 8), pady=3)
+            ttk.Label(self.details_frame, text=access_text).grid(row=row_idx, column=1, sticky="nw", padx=(0, 8), pady=3)
             var = tk.StringVar(value=self._format_attribute_value(value))
             entry = ttk.Entry(self.details_frame, textvariable=var)
-            entry.grid(row=row_idx, column=1, sticky="ew", pady=3)
+            entry.grid(row=row_idx, column=2, sticky="ew", pady=3)
             if is_writable:
                 self.attribute_vars[int(index)] = var
                 writable_count += 1

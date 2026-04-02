@@ -262,6 +262,12 @@ def _get_attribute_access(obj: GXDLMSObject, index: int) -> tuple[Any, Any, bool
     return attribute_access.access, attribute_access.access3, True
 
 
+def _format_attribute_access(access_mode: Any, access_mode_v3: Any, access_known: bool) -> str:
+    if not access_known:
+        return f"Unknown ({access_mode} / {access_mode_v3})"
+    return f"{access_mode} / {access_mode_v3}"
+
+
 @dataclass
 class DlmsObjectInfo:
     object_type: str
@@ -752,7 +758,7 @@ class DlmsBrowserService:
         self._log("event", f"Object list prepared: {len(result)} item(s).")
         return result
 
-    def read_object_attributes(self, logical_name: str) -> list[tuple[int, Any, bool]]:
+    def read_object_attributes(self, logical_name: str) -> list[tuple[int, Any, bool, str]]:
         if not self.reader or not self.client:
             raise RuntimeError("Not connected.")
         obj = self.client.objects.findByLN(ObjectType.NONE, logical_name)
@@ -767,24 +773,23 @@ class DlmsBrowserService:
             raise ValueError(
                 f"Object {logical_name} not found. Read object tree first or ensure the object exists on the meter."
             )
-        values: list[tuple[int, Any, bool]] = []
+        values: list[tuple[int, Any, bool, str]] = []
         for index in obj.getAttributeIndexToRead(True):
             access_mode, access_mode_v3, access_known = _get_attribute_access(obj, index)
             access_known = access_known and (
                 _access_mode_is_known(access_mode) or _access_mode_is_known(access_mode_v3)
             )
-            writable = (
+            writable = access_known and (
                 _is_writable_access_mode(access_mode) or _is_writable_access_mode(access_mode_v3)
-                if access_known
-                else True
             )
+            access_text = _format_attribute_access(access_mode, access_mode_v3, access_known)
             try:
                 if obj.canRead(index):
                     value = self.reader.read(obj, index)
-                    values.append((index, value, writable))
+                    values.append((index, value, writable, access_text))
             except Exception as exc:
                 self._log("event", f"Attribute read failed for {logical_name}:{index}: {exc}")
-                values.append((index, f"<read error: {exc}>", writable))
+                values.append((index, f"<read error: {exc}>", writable, access_text))
         return values
 
     def write_object_attributes(self, logical_name: str, values: dict[int, str]) -> None:
